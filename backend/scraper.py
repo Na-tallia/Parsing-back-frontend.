@@ -31,7 +31,7 @@ def run_parser():
     try:
         driver.get(url)
         print(f"Загрузка страницы: {url}")
-        time.sleep(5)  # Ожидание загрузки JavaScript
+        time.sleep(100)  # Ожидание загрузки JavaScript
 
         # Поиск всех блоков товаров по вашему селектору
         # <li js--product-list__product ...>
