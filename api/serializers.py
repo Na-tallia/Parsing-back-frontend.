@@ -3,6 +3,9 @@ from .models import Product, CartItem
 
 # Сериализатор для товаров
 class ProductSerializer(serializers.ModelSerializer):
+    # Явно указываем формат цены для правильной сериализации DecimalField
+    price = serializers.DecimalField(max_digits=10, decimal_places=2, coerce_to_string=False)
+    
     class Meta:
         model = Product
         # Указываем, какие поля мы хотим отправлять на фронтенд
