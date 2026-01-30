@@ -3,7 +3,11 @@ from rest_framework.response import Response
 from rest_framework.decorators import api_view, permission_classes
 import threading
 from .models import Product, CartItem
-from .serializers import ProductSerializer, CartItemSerializer
+from .serializers import ProductSerializer, CartItemSerializer, UserSerializer
+from django.contrib.auth import authenticate
+from django.contrib.auth import login as django_login, logout as django_logout
+from django.contrib.auth.models import User
+from django.views.decorators.csrf import ensure_csrf_cookie
 
 # Представление для товаров
 class ProductViewSet(viewsets.ModelViewSet):
@@ -148,4 +152,108 @@ def update_products(request):
             'status': 'error',
             'message': f'Ошибка при запуске парсера: {str(e)}'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+@permission_classes([permissions.AllowAny])
+@ensure_csrf_cookie
+def csrf(request):
+    """
+    Устанавливает cookie csrftoken (нужно для SessionAuth из React).
+    """
+    return Response({'detail': 'CSRF cookie set'})
+
+
+def _get_anonymous_user_from_session(request):
+    session_key = request.session.session_key
+    if not session_key:
+        return None
+    username = f'anonymous_{session_key}'
+    return User.objects.filter(username=username).first()
+
+
+def _merge_cart_items(from_user, to_user):
+    """
+    Переносит корзину с анонимного пользователя на реального.
+    Объединяет одинаковые товары по сумме quantity.
+    """
+    if not from_user or not to_user or from_user.id == to_user.id:
+        return
+
+    for item in CartItem.objects.filter(user=from_user):
+        existing = CartItem.objects.filter(user=to_user, product=item.product).first()
+        if existing:
+            existing.quantity += item.quantity
+            existing.save()
+            item.delete()
+        else:
+            item.user = to_user
+            item.save()
+
+
+@api_view(['GET'])
+@permission_classes([permissions.AllowAny])
+def me(request):
+    if not request.user.is_authenticated:
+        return Response({'is_authenticated': False, 'user': None}, status=status.HTTP_200_OK)
+    return Response({'is_authenticated': True, 'user': UserSerializer(request.user).data}, status=status.HTTP_200_OK)
+
+
+@api_view(['POST'])
+@permission_classes([permissions.AllowAny])
+def register(request):
+    """
+    Регистрация пользователя (сохранение в БД).
+    Ожидает: username, password, (опционально email).
+    Автоматически логинит пользователя (создаёт сессию).
+    """
+    username = (request.data.get('username') or '').strip()
+    password = request.data.get('password') or ''
+    email = (request.data.get('email') or '').strip()
+
+    if not username or not password:
+        return Response({'detail': 'username и password обязательны'}, status=status.HTTP_400_BAD_REQUEST)
+
+    if User.objects.filter(username=username).exists():
+        return Response({'detail': 'Пользователь с таким username уже существует'}, status=status.HTTP_400_BAD_REQUEST)
+
+    anonymous_user = _get_anonymous_user_from_session(request)
+    user = User.objects.create_user(username=username, password=password, email=email)
+    django_login(request, user)
+
+    # переносим корзину, если была
+    _merge_cart_items(anonymous_user, user)
+
+    return Response({'is_authenticated': True, 'user': UserSerializer(user).data}, status=status.HTTP_201_CREATED)
+
+
+@api_view(['POST'])
+@permission_classes([permissions.AllowAny])
+def login(request):
+    """
+    Логин через сессии.
+    Ожидает: username, password.
+    """
+    username = (request.data.get('username') or '').strip()
+    password = request.data.get('password') or ''
+
+    if not username or not password:
+        return Response({'detail': 'username и password обязательны'}, status=status.HTTP_400_BAD_REQUEST)
+
+    user = authenticate(request, username=username, password=password)
+    if not user:
+        return Response({'detail': 'Неверный логин или пароль'}, status=status.HTTP_400_BAD_REQUEST)
+
+    anonymous_user = _get_anonymous_user_from_session(request)
+    django_login(request, user)
+    _merge_cart_items(anonymous_user, user)
+
+    return Response({'is_authenticated': True, 'user': UserSerializer(user).data}, status=status.HTTP_200_OK)
+
+
+@api_view(['POST'])
+@permission_classes([permissions.AllowAny])
+def logout(request):
+    django_logout(request)
+    return Response({'detail': 'ok'}, status=status.HTTP_200_OK)
 

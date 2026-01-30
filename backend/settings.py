@@ -26,7 +26,7 @@ SECRET_KEY = 'django-insecure-(vw)-8ys=kfjp-y8npqk+by2$l2&na5v1@7^7j#bxt($a^u%8y
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ['127.0.0.1', 'localhost']
 
 
 # Application definition
@@ -128,6 +128,16 @@ STATIC_URL = 'static/'
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 CORS_ALLOW_ALL_ORIGINS = True
 CORS_ALLOW_CREDENTIALS = True  # Разрешаем передачу cookies для сессий
+
+# Для работы CSRF при запросах с другого origin (React dev server)
+CSRF_TRUSTED_ORIGINS = [
+    'http://localhost:3000',
+    'http://127.0.0.1:3000',
+]
+
+# В dev удобно явно настроить cookies для кросс-ориджин запросов
+SESSION_COOKIE_SAMESITE = 'Lax'
+CSRF_COOKIE_SAMESITE = 'Lax'
 
 # Настройки Django REST Framework
 REST_FRAMEWORK = {

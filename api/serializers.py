@@ -1,5 +1,6 @@
 from rest_framework import serializers
 from .models import Product, CartItem
+from django.contrib.auth.models import User
 
 # Сериализатор для товаров
 class ProductSerializer(serializers.ModelSerializer):
@@ -25,3 +26,9 @@ class CartItemSerializer(serializers.ModelSerializer):
     class Meta:
         model = CartItem
         fields = ['id', 'product', 'product_id', 'quantity', 'added_at']
+
+
+class UserSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = User
+        fields = ['id', 'username', 'email', 'first_name', 'last_name']
