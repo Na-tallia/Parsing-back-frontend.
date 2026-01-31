@@ -27,7 +27,7 @@ function App() {
   // Модальное окно входа/регистрации
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [authTab, setAuthTab] = useState('login');  // 'login' | 'register'
-  const [authForm, setAuthForm] = useState({ username: '', password: '', email: '' });
+  const [authForm, setAuthForm] = useState({ email: '', password: '' });
   const [authError, setAuthError] = useState('');
   const [authSubmitting, setAuthSubmitting] = useState(false);
 
@@ -214,14 +214,13 @@ function App() {
       const token = getCsrfToken();
       if (token) axios.defaults.headers.common['X-CSRFToken'] = token;
       const r = await axios.post(`${API_URL}auth/register/`, {
-        username: authForm.username.trim(),
         email: authForm.email.trim().toLowerCase(),
         password: authForm.password
       });
       if (r.data.is_authenticated && r.data.user) {
         setUser(r.data.user);
         setAuthModalOpen(false);
-        setAuthForm({ username: '', email: '', password: '' });
+        setAuthForm({ email: '', password: '' });
         await fetchCart();
       }
     } catch (err) {
@@ -413,14 +412,14 @@ function App() {
             {authTab === 'login' ? (
               <form onSubmit={handleLogin} className="space-y-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Логин</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Введите e-mail</label>
                   <input
-                    type="text"
-                    value={authForm.username}
-                    onChange={e => setAuthForm(f => ({ ...f, username: e.target.value }))}
+                    type="email"
+                    value={authForm.email}
+                    onChange={e => setAuthForm(f => ({ ...f, email: e.target.value }))}
                     className="w-full border rounded-lg px-3 py-2"
                     required
-                    autoComplete="username"
+                    autoComplete="email"
                   />
                 </div>
                 <div>
@@ -444,17 +443,6 @@ function App() {
               </form>
             ) : (
               <form onSubmit={handleRegister} className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Логин <span className="text-red-500">*</span></label>
-                  <input
-                    type="text"
-                    value={authForm.username}
-                    onChange={e => setAuthForm(f => ({ ...f, username: e.target.value }))}
-                    className="w-full border rounded-lg px-3 py-2"
-                    required
-                    autoComplete="username"
-                  />
-                </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Электронная почта <span className="text-red-500">*</span></label>
                   <input

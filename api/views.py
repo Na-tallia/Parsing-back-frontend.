@@ -203,27 +203,22 @@ def me(request):
 @permission_classes([permissions.AllowAny])
 def register(request):
     """
-    Регистрация: логин, email и пароль обязательны.
-    Данные сохраняются в БД один раз при регистрации (модель User).
+    Регистрация только по электронной почте и паролю.
+    Данные сохраняются в БД один раз при регистрации (модель User). username в БД = email.
     """
-    username = (request.data.get('username') or '').strip()
     email = (request.data.get('email') or '').strip().lower()
     password = request.data.get('password') or ''
 
-    if not username:
-        return Response({'detail': 'Логин обязателен'}, status=status.HTTP_400_BAD_REQUEST)
     if not email:
         return Response({'detail': 'Электронная почта обязательна'}, status=status.HTTP_400_BAD_REQUEST)
     if not password:
         return Response({'detail': 'Пароль обязателен'}, status=status.HTTP_400_BAD_REQUEST)
 
-    if User.objects.filter(username=username).exists():
-        return Response({'detail': 'Пользователь с таким логином уже существует'}, status=status.HTTP_400_BAD_REQUEST)
     if User.objects.filter(email__iexact=email).exists():
         return Response({'detail': 'Пользователь с такой электронной почтой уже зарегистрирован'}, status=status.HTTP_400_BAD_REQUEST)
 
     anonymous_user = _get_anonymous_user_from_session(request)
-    user = User.objects.create_user(username=username, email=email, password=password)
+    user = User.objects.create_user(username=email, email=email, password=password)
     django_login(request, user)
 
     _merge_cart_items(anonymous_user, user)
