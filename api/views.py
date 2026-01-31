@@ -203,27 +203,30 @@ def me(request):
 @permission_classes([permissions.AllowAny])
 def register(request):
     """
-    Регистрация пользователя (сохранение в БД).
-    Ожидает: username, password, (опционально email).
-    Автоматически логинит пользователя (создаёт сессию).
+    Регистрация: логин, email и пароль обязательны.
+    Данные сохраняются в БД один раз при регистрации (модель User).
     """
     username = (request.data.get('username') or '').strip()
+    email = (request.data.get('email') or '').strip().lower()
     password = request.data.get('password') or ''
-    email = (request.data.get('email') or '').strip()
 
-    if not username or not password:
-        return Response({'detail': 'username и password обязательны'}, status=status.HTTP_400_BAD_REQUEST)
+    if not username:
+        return Response({'detail': 'Логин обязателен'}, status=status.HTTP_400_BAD_REQUEST)
+    if not email:
+        return Response({'detail': 'Электронная почта обязательна'}, status=status.HTTP_400_BAD_REQUEST)
+    if not password:
+        return Response({'detail': 'Пароль обязателен'}, status=status.HTTP_400_BAD_REQUEST)
 
     if User.objects.filter(username=username).exists():
-        return Response({'detail': 'Пользователь с таким username уже существует'}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({'detail': 'Пользователь с таким логином уже существует'}, status=status.HTTP_400_BAD_REQUEST)
+    if User.objects.filter(email__iexact=email).exists():
+        return Response({'detail': 'Пользователь с такой электронной почтой уже зарегистрирован'}, status=status.HTTP_400_BAD_REQUEST)
 
     anonymous_user = _get_anonymous_user_from_session(request)
-    user = User.objects.create_user(username=username, password=password, email=email)
+    user = User.objects.create_user(username=username, email=email, password=password)
     django_login(request, user)
 
-    # переносим корзину, если была
     _merge_cart_items(anonymous_user, user)
-
     return Response({'is_authenticated': True, 'user': UserSerializer(user).data}, status=status.HTTP_201_CREATED)
 
 
@@ -231,23 +234,26 @@ def register(request):
 @permission_classes([permissions.AllowAny])
 def login(request):
     """
-    Логин через сессии.
-    Ожидает: username, password.
+    Вход по email и паролю.
+    Ожидает: email, password.
     """
-    username = (request.data.get('username') or '').strip()
+    email = (request.data.get('email') or '').strip().lower()
     password = request.data.get('password') or ''
 
-    if not username or not password:
-        return Response({'detail': 'username и password обязательны'}, status=status.HTTP_400_BAD_REQUEST)
+    if not email or not password:
+        return Response({'detail': 'Email и пароль обязательны'}, status=status.HTTP_400_BAD_REQUEST)
 
-    user = authenticate(request, username=username, password=password)
+    user_by_email = User.objects.filter(email__iexact=email).first()
+    if not user_by_email:
+        return Response({'detail': 'Неверный email или пароль'}, status=status.HTTP_400_BAD_REQUEST)
+
+    user = authenticate(request, username=user_by_email.username, password=password)
     if not user:
-        return Response({'detail': 'Неверный логин или пароль'}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({'detail': 'Неверный email или пароль'}, status=status.HTTP_400_BAD_REQUEST)
 
     anonymous_user = _get_anonymous_user_from_session(request)
     django_login(request, user)
     _merge_cart_items(anonymous_user, user)
-
     return Response({'is_authenticated': True, 'user': UserSerializer(user).data}, status=status.HTTP_200_OK)
 
 

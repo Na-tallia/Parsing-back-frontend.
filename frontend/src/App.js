@@ -9,15 +9,27 @@ const LOCAL_CART_KEY = 'dns_by_cart_v1';
 // Настройка axios для работы с сессиями Django
 axios.defaults.withCredentials = true;
 
+function getCsrfToken() {
+  const match = document.cookie.match(/\bcsrftoken=([^;]+)/);
+  return match ? match[1] : null;
+}
+
 function App() {
   const [products, setProducts] = useState([]);
   const [cart, setCart] = useState([]);
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [view, setView] = useState('catalog'); // 'catalog' или 'cart'
+  const [user, setUser] = useState(null);           // { id, username, email, ... } или null
+  const [authLoading, setAuthLoading] = useState(true); // проверка сессии при загрузке
+  const [view, setView] = useState('catalog');      // 'catalog' или 'cart'
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [parsing, setParsing] = useState(false);
   const [parseMessage, setParseMessage] = useState(null);
+  // Модальное окно входа/регистрации
+  const [authModalOpen, setAuthModalOpen] = useState(false);
+  const [authTab, setAuthTab] = useState('login');  // 'login' | 'register'
+  const [authForm, setAuthForm] = useState({ username: '', password: '', email: '' });
+  const [authError, setAuthError] = useState('');
+  const [authSubmitting, setAuthSubmitting] = useState(false);
 
   const saveCartToStorage = (nextCart) => {
     try {
@@ -139,12 +151,104 @@ function App() {
     }
   };
 
-  // Загрузка товаров и корзины из Django при старте
+  // Проверка текущего пользователя при загрузке (CSRF + /api/auth/me/)
+  const fetchMe = async () => {
+    try {
+      const r = await axios.get(`${API_URL}auth/me/`);
+      if (r.data.is_authenticated && r.data.user) {
+        setUser(r.data.user);
+      } else {
+        setUser(null);
+      }
+    } catch (e) {
+      setUser(null);
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  const ensureCsrfThenFetchMe = async () => {
+    try {
+      await axios.get(`${API_URL}auth/csrf/`);
+      const token = getCsrfToken();
+      if (token) axios.defaults.headers.common['X-CSRFToken'] = token;
+      await fetchMe();
+    } catch (e) {
+      setAuthLoading(false);
+      setUser(null);
+    }
+  };
+
+  // Вход через API
+  const handleLogin = async (e) => {
+    e.preventDefault();
+    setAuthError('');
+    setAuthSubmitting(true);
+    try {
+      const token = getCsrfToken();
+      if (token) axios.defaults.headers.common['X-CSRFToken'] = token;
+      const r = await axios.post(`${API_URL}auth/login/`, {
+        email: authForm.email.trim().toLowerCase(),
+        password: authForm.password
+      });
+      if (r.data.is_authenticated && r.data.user) {
+        setUser(r.data.user);
+        setAuthModalOpen(false);
+        setAuthForm({ email: '', password: '' });
+        await fetchCart();
+      }
+    } catch (err) {
+      const msg = err.response?.data?.detail || err.message || 'Ошибка входа';
+      setAuthError(typeof msg === 'string' ? msg : JSON.stringify(msg));
+    } finally {
+      setAuthSubmitting(false);
+    }
+  };
+
+  // Регистрация через API
+  const handleRegister = async (e) => {
+    e.preventDefault();
+    setAuthError('');
+    setAuthSubmitting(true);
+    try {
+      const token = getCsrfToken();
+      if (token) axios.defaults.headers.common['X-CSRFToken'] = token;
+      const r = await axios.post(`${API_URL}auth/register/`, {
+        username: authForm.username.trim(),
+        email: authForm.email.trim().toLowerCase(),
+        password: authForm.password
+      });
+      if (r.data.is_authenticated && r.data.user) {
+        setUser(r.data.user);
+        setAuthModalOpen(false);
+        setAuthForm({ username: '', email: '', password: '' });
+        await fetchCart();
+      }
+    } catch (err) {
+      const msg = err.response?.data?.detail || err.message || 'Ошибка регистрации';
+      setAuthError(typeof msg === 'string' ? msg : JSON.stringify(msg));
+    } finally {
+      setAuthSubmitting(false);
+    }
+  };
+
+  // Выход
+  const handleLogout = async () => {
+    try {
+      const token = getCsrfToken();
+      if (token) axios.defaults.headers.common['X-CSRFToken'] = token;
+      await axios.post(`${API_URL}auth/logout/`);
+    } catch (e) { /* ignore */ }
+    setUser(null);
+    await fetchCart();
+  };
+
+  // Загрузка товаров, корзины и текущего пользователя при старте
   useEffect(() => {
-    // Быстрый старт: сначала показываем локальную корзину, затем пытаемся синхронизироваться с API
     setCart(loadCartFromStorage());
     fetchProducts();
     fetchCart();
+    ensureCsrfThenFetchMe();
   }, []);
 
   // Функция для запуска парсинга
@@ -242,12 +346,34 @@ function App() {
           </div>
 
           <div className="flex items-center gap-4">
-            <button
-              onClick={() => setIsLoggedIn(!isLoggedIn)}
-              className="flex items-center gap-2 bg-blue-800 px-4 py-2 rounded hover:bg-blue-900 transition"
-            >
-              {isLoggedIn ? <><LogOut size={18}/> Выйти</> : <><LogIn size={18}/> Войти</>}
-            </button>
+            {authLoading ? (
+              <span className="text-sm opacity-80">Загрузка...</span>
+            ) : user ? (
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-medium truncate max-w-[180px]" title={user.email}>{user.email}</span>
+                <button
+                  onClick={handleLogout}
+                  className="flex items-center gap-2 bg-blue-800 px-4 py-2 rounded hover:bg-blue-900 transition"
+                >
+                  <LogOut size={18}/> Выйти
+                </button>
+              </div>
+            ) : (
+              <>
+                <button
+                  onClick={() => { setAuthTab('login'); setAuthError(''); setAuthModalOpen(true); }}
+                  className="flex items-center gap-2 bg-blue-800 px-4 py-2 rounded hover:bg-blue-900 transition"
+                >
+                  <LogIn size={18}/> Войти
+                </button>
+                <button
+                  onClick={() => { setAuthTab('register'); setAuthError(''); setAuthModalOpen(true); }}
+                  className="flex items-center gap-2 bg-green-700 px-4 py-2 rounded hover:bg-green-800 transition"
+                >
+                  Регистрация
+                </button>
+              </>
+            )}
 
             <button
               onClick={() => setView('cart')}
@@ -263,6 +389,107 @@ function App() {
           </div>
         </div>
       </header>
+
+      {/* Модальное окно Вход / Регистрация */}
+      {authModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setAuthModalOpen(false)}>
+          <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6" onClick={e => e.stopPropagation()}>
+            <div className="flex border-b mb-4">
+              <button
+                type="button"
+                onClick={() => { setAuthTab('login'); setAuthError(''); }}
+                className={`flex-1 py-2 font-semibold ${authTab === 'login' ? 'border-b-2 border-blue-700 text-blue-700' : 'text-gray-500'}`}
+              >
+                Вход
+              </button>
+              <button
+                type="button"
+                onClick={() => { setAuthTab('register'); setAuthError(''); }}
+                className={`flex-1 py-2 font-semibold ${authTab === 'register' ? 'border-b-2 border-blue-700 text-blue-700' : 'text-gray-500'}`}
+              >
+                Регистрация
+              </button>
+            </div>
+            {authTab === 'login' ? (
+              <form onSubmit={handleLogin} className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Логин</label>
+                  <input
+                    type="text"
+                    value={authForm.username}
+                    onChange={e => setAuthForm(f => ({ ...f, username: e.target.value }))}
+                    className="w-full border rounded-lg px-3 py-2"
+                    required
+                    autoComplete="username"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Пароль</label>
+                  <input
+                    type="password"
+                    value={authForm.password}
+                    onChange={e => setAuthForm(f => ({ ...f, password: e.target.value }))}
+                    className="w-full border rounded-lg px-3 py-2"
+                    required
+                    autoComplete="current-password"
+                  />
+                </div>
+                {authError && <p className="text-red-600 text-sm">{authError}</p>}
+                <div className="flex gap-2">
+                  <button type="submit" disabled={authSubmitting} className="flex-1 bg-blue-700 text-white py-2 rounded-lg font-semibold hover:bg-blue-800 disabled:opacity-50">
+                    {authSubmitting ? 'Вход...' : 'Войти'}
+                  </button>
+                  <button type="button" onClick={() => setAuthModalOpen(false)} className="px-4 py-2 border rounded-lg hover:bg-gray-50">Отмена</button>
+                </div>
+              </form>
+            ) : (
+              <form onSubmit={handleRegister} className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Логин <span className="text-red-500">*</span></label>
+                  <input
+                    type="text"
+                    value={authForm.username}
+                    onChange={e => setAuthForm(f => ({ ...f, username: e.target.value }))}
+                    className="w-full border rounded-lg px-3 py-2"
+                    required
+                    autoComplete="username"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Электронная почта <span className="text-red-500">*</span></label>
+                  <input
+                    type="email"
+                    value={authForm.email}
+                    onChange={e => setAuthForm(f => ({ ...f, email: e.target.value }))}
+                    className="w-full border rounded-lg px-3 py-2"
+                    required
+                    autoComplete="email"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Пароль <span className="text-red-500">*</span></label>
+                  <input
+                    type="password"
+                    value={authForm.password}
+                    onChange={e => setAuthForm(f => ({ ...f, password: e.target.value }))}
+                    className="w-full border rounded-lg px-3 py-2"
+                    required
+                    minLength={8}
+                    autoComplete="new-password"
+                  />
+                </div>
+                {authError && <p className="text-red-600 text-sm">{authError}</p>}
+                <div className="flex gap-2">
+                  <button type="submit" disabled={authSubmitting} className="flex-1 bg-green-700 text-white py-2 rounded-lg font-semibold hover:bg-green-800 disabled:opacity-50">
+                    {authSubmitting ? 'Регистрация...' : 'Зарегистрироваться'}
+                  </button>
+                  <button type="button" onClick={() => setAuthModalOpen(false)} className="px-4 py-2 border rounded-lg hover:bg-gray-50">Отмена</button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* КОНТЕНТ */}
       <main className="flex-grow container mx-auto px-4 py-8">
