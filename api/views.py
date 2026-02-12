@@ -2,7 +2,7 @@ from rest_framework import viewsets, permissions, status
 from rest_framework.response import Response
 from rest_framework.decorators import api_view, permission_classes
 import threading
-from .models import Product, CartItem
+from .models import Product, CartItem, UserProfile, Order
 from .serializers import ProductSerializer, CartItemSerializer, UserSerializer
 from django.contrib.auth import authenticate
 from django.contrib.auth import login as django_login, logout as django_logout
@@ -219,6 +219,11 @@ def register(request):
 
     anonymous_user = _get_anonymous_user_from_session(request)
     user = User.objects.create_user(username=email, email=email, password=password)
+    # Сохраняем данные в api_userprofile, если миграция применена
+    try:
+        UserProfile.objects.get_or_create(user=user, defaults={'email': email})
+    except Exception:
+        pass  # таблица может отсутствовать — пользователь уже в auth_user
     django_login(request, user)
 
     _merge_cart_items(anonymous_user, user)
@@ -257,4 +262,106 @@ def login(request):
 def logout(request):
     django_logout(request)
     return Response({'detail': 'ok'}, status=status.HTTP_200_OK)
+
+
+@api_view(['POST'])
+@permission_classes([permissions.AllowAny])
+def create_order(request):
+    """
+    Создание заказа с данными доставки и отправка email.
+    Ожидает: full_name, phone, city, delivery_address, delivery_date, delivery_time, cart_items (массив с id товаров)
+    """
+    from django.core.mail import send_mail
+    from django.conf import settings
+    from datetime import datetime
+    
+    full_name = request.data.get('full_name', '').strip()
+    phone = request.data.get('phone', '').strip()
+    city = request.data.get('city', '').strip()
+    delivery_address = request.data.get('delivery_address', '').strip()
+    delivery_date = request.data.get('delivery_date', '').strip()
+    delivery_time = request.data.get('delivery_time', '').strip()
+    cart_items = request.data.get('cart_items', [])  # массив объектов {id, title, price, quantity}
+    total_price = request.data.get('total_price', 0)
+    
+    # Валидация
+    if not all([full_name, phone, city, delivery_address, delivery_date, delivery_time]):
+        return Response({'detail': 'Все поля обязательны для заполнения'}, status=status.HTTP_400_BAD_REQUEST)
+    
+    if not cart_items:
+        return Response({'detail': 'Корзина пуста'}, status=status.HTTP_400_BAD_REQUEST)
+    
+    # Валидация телефона (+375 и 9 цифр)
+    import re
+    if not re.match(r'^\+375\d{9}$', phone):
+        return Response({'detail': 'Телефон должен быть в формате +375XXXXXXXXX (9 цифр после +375)'}, status=status.HTTP_400_BAD_REQUEST)
+    
+    # Получаем пользователя (если авторизован) или None
+    user = request.user if request.user.is_authenticated else None
+    
+    try:
+        # Создаём заказ в БД
+        order = Order.objects.create(
+            user=user,
+            full_name=full_name,
+            phone=phone,
+            city=city,
+            delivery_address=delivery_address,
+            delivery_date=delivery_date,
+            delivery_time=delivery_time,
+            total_price=total_price
+        )
+        
+        # Формируем текст письма
+        items_text = '\n'.join([
+            f"- {item.get('title', 'Товар')} - {item.get('quantity', 1)} шт. × {item.get('price', 0)} BYN = {float(item.get('price', 0)) * int(item.get('quantity', 1)):.2f} BYN"
+            for item in cart_items
+        ])
+        
+        email_body = f"""
+Новый заказ #{order.id}
+
+Данные покупателя:
+ФИО: {full_name}
+Телефон: {phone}
+Email: {user.email if user and hasattr(user, 'email') else 'Не указан (неавторизованный пользователь)'}
+
+Адрес доставки:
+Город: {city}
+Адрес: {delivery_address}
+
+Дата и время доставки:
+{delivery_date} с {delivery_time}
+
+Товары в заказе:
+{items_text}
+
+Общая сумма: {total_price} BYN
+
+Дата создания заказа: {order.created_at.strftime('%d.%m.%Y %H:%M')}
+"""
+        
+        # Отправляем email
+        try:
+            send_mail(
+                subject=f'Новый заказ #{order.id} от {full_name}',
+                message=email_body,
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=['mlz.kng@gmail.com'],
+                fail_silently=False,
+            )
+        except Exception as e:
+            # Логируем ошибку, но заказ уже сохранён
+            print(f"Ошибка отправки email: {e}")
+        
+        return Response({
+            'status': 'success',
+            'message': 'Заказ успешно оформлен!',
+            'order_id': order.id
+        }, status=status.HTTP_201_CREATED)
+        
+    except Exception as e:
+        return Response({
+            'detail': f'Ошибка при создании заказа: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 

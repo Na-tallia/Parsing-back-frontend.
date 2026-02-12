@@ -30,6 +30,18 @@ function App() {
   const [authForm, setAuthForm] = useState({ email: '', password: '' });
   const [authError, setAuthError] = useState('');
   const [authSubmitting, setAuthSubmitting] = useState(false);
+  // Модальное окно оформления заказа
+  const [orderModalOpen, setOrderModalOpen] = useState(false);
+  const [orderForm, setOrderForm] = useState({
+    full_name: '',
+    phone: '',
+    city: '',
+    delivery_address: '',
+    delivery_date: '',
+    delivery_time: ''
+  });
+  const [orderError, setOrderError] = useState('');
+  const [orderSubmitting, setOrderSubmitting] = useState(false);
 
   const saveCartToStorage = (nextCart) => {
     try {
@@ -240,6 +252,59 @@ function App() {
     } catch (e) { /* ignore */ }
     setUser(null);
     await fetchCart();
+  };
+
+  // Оформление заказа
+  const handleSubmitOrder = async (e) => {
+    e.preventDefault();
+    setOrderError('');
+    setOrderSubmitting(true);
+    
+    try {
+      const token = getCsrfToken();
+      if (token) axios.defaults.headers.common['X-CSRFToken'] = token;
+      
+      // Подготавливаем данные товаров из корзины
+      const cartItems = cart.map(item => ({
+        id: item.id,
+        title: item.title,
+        price: typeof item.price === 'number' ? item.price : parseFloat(item.price),
+        quantity: item.quantity || 1
+      }));
+      
+      const r = await axios.post(`${API_URL}orders/create/`, {
+        full_name: orderForm.full_name.trim(),
+        phone: orderForm.phone.trim(),
+        city: orderForm.city,
+        delivery_address: orderForm.delivery_address.trim(),
+        delivery_date: orderForm.delivery_date,
+        delivery_time: orderForm.delivery_time,
+        cart_items: cartItems,
+        total_price: totalPrice
+      });
+      
+      if (r.data.status === 'success') {
+        alert('Заказ успешно оформлен! Мы свяжемся с вами в ближайшее время.');
+        setOrderModalOpen(false);
+        setOrderForm({
+          full_name: '',
+          phone: '',
+          city: '',
+          delivery_address: '',
+          delivery_date: '',
+          delivery_time: ''
+        });
+        // Очищаем корзину после успешного заказа
+        setCart([]);
+        saveCartToStorage([]);
+        await fetchCart();
+      }
+    } catch (err) {
+      const msg = err.response?.data?.detail || err.message || 'Ошибка при оформлении заказа';
+      setOrderError(typeof msg === 'string' ? msg : JSON.stringify(msg));
+    } finally {
+      setOrderSubmitting(false);
+    }
   };
 
   // Загрузка товаров, корзины и текущего пользователя при старте
@@ -479,6 +544,143 @@ function App() {
         </div>
       )}
 
+      {/* Модальное окно оформления заказа */}
+      {orderModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 overflow-y-auto" onClick={() => setOrderModalOpen(false)}>
+          <div className="bg-white rounded-2xl shadow-xl max-w-2xl w-full p-6 my-8" onClick={e => e.stopPropagation()}>
+            <h2 className="text-2xl font-bold mb-6">Оформление заказа</h2>
+            <form onSubmit={handleSubmitOrder} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Фамилия Имя Отчество <span className="text-red-500">*</span></label>
+                <input
+                  type="text"
+                  value={orderForm.full_name}
+                  onChange={e => setOrderForm(f => ({ ...f, full_name: e.target.value }))}
+                  className="w-full border rounded-lg px-3 py-2"
+                  required
+                  placeholder="Иванов Иван Иванович"
+                />
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Номер телефона <span className="text-red-500">*</span></label>
+                <input
+                  type="tel"
+                  value={orderForm.phone}
+                  onChange={e => {
+                    let val = e.target.value.replace(/\D/g, '');
+                    if (val.length > 0 && !val.startsWith('375')) {
+                      val = '375' + val;
+                    }
+                    if (val.length > 3) {
+                      val = '+' + val.substring(0, 3) + val.substring(3, 12);
+                    } else if (val.length > 0) {
+                      val = '+' + val;
+                    }
+                    setOrderForm(f => ({ ...f, phone: val }));
+                  }}
+                  className="w-full border rounded-lg px-3 py-2"
+                  required
+                  placeholder="+375XXXXXXXXX"
+                  pattern="\+375\d{9}"
+                  maxLength={13}
+                />
+                <p className="text-xs text-gray-500 mt-1">Формат: +375 и 9 цифр</p>
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Город <span className="text-red-500">*</span></label>
+                <select
+                  value={orderForm.city}
+                  onChange={e => setOrderForm(f => ({ ...f, city: e.target.value }))}
+                  className="w-full border rounded-lg px-3 py-2"
+                  required
+                >
+                  <option value="">Выберите город</option>
+                  <option value="Минск">Минск</option>
+                  <option value="Брест">Брест</option>
+                  <option value="Витебск">Витебск</option>
+                  <option value="Гомель">Гомель</option>
+                  <option value="Гродно">Гродно</option>
+                  <option value="Могилев">Могилев</option>
+                </select>
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Адрес доставки <span className="text-red-500">*</span></label>
+                <textarea
+                  value={orderForm.delivery_address}
+                  onChange={e => setOrderForm(f => ({ ...f, delivery_address: e.target.value }))}
+                  className="w-full border rounded-lg px-3 py-2"
+                  required
+                  rows={3}
+                  placeholder="Улица, номер дома, номер квартиры, номер этажа"
+                />
+              </div>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Дата доставки <span className="text-red-500">*</span></label>
+                  <input
+                    type="date"
+                    value={orderForm.delivery_date}
+                    onChange={e => setOrderForm(f => ({ ...f, delivery_date: e.target.value }))}
+                    className="w-full border rounded-lg px-3 py-2"
+                    required
+                    min={new Date().toISOString().split('T')[0]}
+                  />
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Время доставки <span className="text-red-500">*</span></label>
+                  <select
+                    value={orderForm.delivery_time}
+                    onChange={e => setOrderForm(f => ({ ...f, delivery_time: e.target.value }))}
+                    className="w-full border rounded-lg px-3 py-2"
+                    required
+                  >
+                    <option value="">Выберите время</option>
+                    <option value="9:00-11:00">9:00-11:00</option>
+                    <option value="11:00-13:00">11:00-13:00</option>
+                    <option value="13:00-15:00">13:00-15:00</option>
+                    <option value="15:00-17:00">15:00-17:00</option>
+                    <option value="17:00-19:00">17:00-19:00</option>
+                    <option value="19:00-21:00">19:00-21:00</option>
+                  </select>
+                </div>
+              </div>
+              
+              <div className="bg-gray-50 p-4 rounded-lg">
+                <p className="text-sm text-gray-600 mb-2">Итого к оплате:</p>
+                <p className="text-2xl font-bold text-blue-800">{totalPrice.toFixed(2)} BYN</p>
+              </div>
+              
+              {orderError && <p className="text-red-600 text-sm">{orderError}</p>}
+              
+              <div className="flex gap-2 pt-4">
+                <button 
+                  type="submit" 
+                  disabled={orderSubmitting || cart.length === 0} 
+                  className="flex-1 bg-green-600 text-white py-3 rounded-lg font-semibold hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {orderSubmitting ? 'Отправка...' : 'Отправить заявку'}
+                </button>
+                <button 
+                  type="button" 
+                  onClick={() => {
+                    setOrderModalOpen(false);
+                    setOrderError('');
+                  }} 
+                  className="px-6 py-3 border rounded-lg hover:bg-gray-50"
+                >
+                  Отмена
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* КОНТЕНТ */}
       <main className="flex-grow container mx-auto px-4 py-8">
         {view === 'catalog' ? (
@@ -588,7 +790,10 @@ function App() {
                       <p className="text-gray-500 text-sm">Итого к оплате:</p>
                       <p className="text-3xl font-black text-blue-800">{totalPrice.toFixed(2)} BYN</p>
                     </div>
-                    <button className="bg-green-600 text-white px-8 py-4 rounded-xl font-bold text-lg hover:bg-green-700 transition shadow-lg">
+                    <button 
+                      onClick={() => setOrderModalOpen(true)}
+                      className="bg-green-600 text-white px-8 py-4 rounded-xl font-bold text-lg hover:bg-green-700 transition shadow-lg"
+                    >
                       ОФОРМИТЬ ЗАКАЗ
                     </button>
                  </div>

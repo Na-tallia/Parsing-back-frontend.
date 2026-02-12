@@ -19,5 +19,6 @@ urlpatterns = [
     path('api/auth/register/', api_views.register, name='auth-register'),
     path('api/auth/login/', api_views.login, name='auth-login'),
     path('api/auth/logout/', api_views.logout, name='auth-logout'),
+    path('api/orders/create/', api_views.create_order, name='create-order'),
 ]
 

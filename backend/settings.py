@@ -147,3 +147,15 @@ REST_FRAMEWORK = {
     'DEFAULT_PAGINATION_CLASS': None,  # Отключаем пагинацию по умолчанию
     'PAGE_SIZE': None,
 }
+
+# Настройки email для отправки уведомлений о заказах
+EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+EMAIL_HOST = 'smtp.gmail.com'
+EMAIL_PORT = 587
+EMAIL_USE_TLS = True
+EMAIL_HOST_USER = 'mlz.kng@gmail.com'  # Замените на ваш email
+EMAIL_HOST_PASSWORD = 'qkxilamsbtcjffys'  # Здесь должен быть пароль приложения Gmail (не обычный пароль!)
+DEFAULT_FROM_EMAIL = 'mlz.kng@gmail.com'
+
+# Для разработки можно использовать консольный бэкенд (письма выводятся в консоль)
+#EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
