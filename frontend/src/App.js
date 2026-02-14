@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
-import { ShoppingCart, MapPin, RefreshCw, Phone, Trash2, LogIn, LogOut, Tv } from 'lucide-react';
+import { ShoppingCart, MapPin, RefreshCw, Phone, Trash2, LogIn, LogOut, Tv, MessageCircle } from 'lucide-react';
 
 // Относительный URL: запросы идут на тот же origin (localhost:3000), прокси перенаправляет на Django — сессия и куки работают
 const API_URL = '/api/';
@@ -42,6 +42,7 @@ function App() {
   });
   const [orderError, setOrderError] = useState('');
   const [orderSubmitting, setOrderSubmitting] = useState(false);
+  const [sortBy, setSortBy] = useState('price_asc');
 
   const saveCartToStorage = (nextCart) => {
     try {
@@ -391,48 +392,149 @@ function App() {
     return sum + (isNaN(price) ? 0 : price * quantity);
   }, 0);
 
+  // Извлечение размера экрана из названия (число в дюймах)
+  const getScreenInches = (title) => {
+    const match = title && title.match(/(\d+)\s*["']?/);
+    return match ? parseInt(match[1], 10) : 0;
+  };
+
+  // Извлечение названия производителя из заголовка: в базе бренд идёт сразу после слова «Телевизор»
+  const getBrandFromTitle = (title) => {
+    const raw = (title || '').trim();
+    const lower = raw.toLowerCase();
+    const marker = 'телевизор';
+    const idx = lower.indexOf(marker);
+    if (idx === -1) return null;
+    const after = raw.slice(idx + marker.length).trim();
+    const tokens = after.split(/\s+/);
+    for (const t of tokens) {
+      const cleaned = t.replace(/["']+$/, '').trim();
+      if (!cleaned) continue;
+      if (/^\d+$/.test(cleaned)) continue;
+      if (!/[a-zA-Zа-яА-ЯёЁ]/.test(cleaned)) continue;
+      return cleaned;
+    }
+    return null;
+  };
+
+  // Уникальные бренды и диагонали из массива товаров (без дубликатов, бренды — только текстовые названия)
+  const { brands, diagonals } = React.useMemo(() => {
+    const diagSet = new Set();
+    const brandSet = new Set();
+    products.forEach((p) => {
+      const title = p.title || '';
+      const inches = getScreenInches(title);
+      if (inches > 0) diagSet.add(inches);
+      const brand = getBrandFromTitle(title);
+      if (brand) brandSet.add(brand);
+    });
+    return {
+      diagonals: [...diagSet].sort((a, b) => a - b),
+      brands: [...brandSet].sort((a, b) => a.localeCompare(b, 'ru')),
+    };
+  }, [products]);
+
+  // Выпадающий список: Цена (2 пункта) → Размер экрана (динамически) → Бренд (динамически)
+  const sortOptions = React.useMemo(() => {
+    const opts = [
+      { value: 'price_asc', label: 'Цена: сначала дешевые' },
+      { value: 'price_desc', label: 'Цена: сначала дорогие' },
+    ];
+    diagonals.forEach((d) => {
+      opts.push({ value: `diagonal_${d}`, label: `Размер экрана: ${d}"` });
+    });
+    brands.forEach((b) => {
+      opts.push({ value: `brand_${b}`, label: `Бренд: ${b}` });
+    });
+    return opts;
+  }, [diagonals, brands]);
+
+  const sortedProducts = React.useMemo(() => {
+    const price = (p) => (typeof p.price === 'string' ? parseFloat(p.price) : p.price) || 0;
+    let list = [...products];
+
+    if (sortBy === 'price_asc') {
+      return list.sort((a, b) => price(a) - price(b));
+    }
+    if (sortBy === 'price_desc') {
+      return list.sort((a, b) => price(b) - price(a));
+    }
+    if (sortBy.startsWith('diagonal_')) {
+      const size = parseInt(sortBy.replace('diagonal_', ''), 10);
+      if (!Number.isNaN(size)) {
+        list = list.filter((p) => getScreenInches(p.title) === size);
+      }
+      return list.sort((a, b) => price(a) - price(b));
+    }
+    if (sortBy.startsWith('brand_')) {
+      const brand = sortBy.replace('brand_', '');
+      if (brand) {
+        list = list.filter((p) => getBrandFromTitle(p.title) === brand);
+      }
+      return list.sort((a, b) => price(a) - price(b));
+    }
+
+    return list.sort((a, b) => price(a) - price(b));
+  }, [products, sortBy]);
+
+  // Сброс сортировки, если выбранный пункт исчез из списка (например, после обновления товаров)
+  React.useEffect(() => {
+    if (sortOptions.length > 0 && !sortOptions.some((o) => o.value === sortBy)) {
+      setSortBy('price_asc');
+    }
+  }, [sortOptions, sortBy]);
+
   return (
     <div className="min-h-screen flex flex-col bg-gray-50 font-sans">
 
       {/* ШАПКА САЙТА */}
-      <header className="bg-blue-700 text-white p-4 shadow-lg">
-        <div className="container mx-auto flex flex-col md:flex-row justify-between items-center gap-4">
-          <div className="text-center md:text-left">
-            <h1 className="text-2xl font-bold uppercase tracking-tighter flex items-center gap-2 justify-center md:justify-start">
-              <Tv /> DNS-BY TV
+      <header className="bg-[#3299BB] text-white py-6 shadow-lg">
+        <div className="max-w-6xl mx-auto px-4 flex flex-col md:flex-row items-center justify-between gap-3">
+          {/* Левая часть: телефон и написать нам */}
+          <div className="flex flex-col gap-0.5 text-sm order-2 md:order-1">
+            <div className="flex items-center gap-2">
+              <Phone size={14} />
+              <span className="font-medium">Короткий номер 478</span>
+            </div>
+            <div className="flex items-center gap-2 opacity-90 hover:opacity-100 cursor-pointer">
+              <MessageCircle size={14} />
+              <span>Написать нам</span>
+            </div>
+          </div>
+
+          {/* Центр: логотип и подпись */}
+          <div className="text-center order-1 md:order-2 flex flex-col items-center">
+            <h1 className="text-2xl font-bold uppercase tracking-tighter flex items-center justify-center gap-2">
+              <Tv /> МОЙ-ТВ BY
             </h1>
-            <p className="text-sm font-light">Добро пожаловать за покупками. У нас самые выгодные цены!</p>
+            <p className="text-sm font-bold mt-0.5">ВЫБЕРИ СВОЙ ТЕЛЕВИЗОР!</p>
           </div>
 
-          <div className="hidden lg:block text-xs opacity-80">
-            <div className="flex items-center gap-2"><MapPin size={14}/> г.Минск, ул. Саперов, 3</div>
-            <div className="flex items-center gap-2"><Phone size={14}/> +375254560098</div>
-          </div>
-
-          <div className="flex items-center gap-4">
+          {/* Правая часть: авторизация и корзина */}
+          <div className="flex items-center justify-end gap-2 order-3">
             {authLoading ? (
               <span className="text-sm opacity-80">Загрузка...</span>
             ) : user ? (
-              <div className="flex items-center gap-2">
-                <span className="text-sm font-medium truncate max-w-[180px]" title={user.email}>{user.email}</span>
+              <div className="flex items-center gap-2 flex-wrap justify-end">
+                <span className="text-sm font-medium truncate max-w-[120px]" title={user.email}>{user.email}</span>
                 <button
                   onClick={handleLogout}
-                  className="flex items-center gap-2 bg-blue-800 px-4 py-2 rounded hover:bg-blue-900 transition"
+                  className="flex items-center gap-1 bg-[#BCBCBC] text-gray-800 px-2 py-1 rounded text-xs hover:opacity-90 transition shrink-0 min-w-0"
                 >
-                  <LogOut size={18}/> Выйти
+                  <LogOut size={12}/> Выйти
                 </button>
               </div>
             ) : (
               <>
                 <button
                   onClick={() => { setAuthTab('login'); setAuthError(''); setAuthModalOpen(true); }}
-                  className="flex items-center gap-2 bg-blue-800 px-4 py-2 rounded hover:bg-blue-900 transition"
+                  className="flex items-center gap-2 bg-blue-800 px-4 py-1.5 rounded text-sm hover:bg-blue-900 transition"
                 >
-                  <LogIn size={18}/> Войти
+                  <LogIn size={16}/> Войти
                 </button>
                 <button
                   onClick={() => { setAuthTab('register'); setAuthError(''); setAuthModalOpen(true); }}
-                  className="flex items-center gap-2 bg-green-700 px-4 py-2 rounded hover:bg-green-800 transition"
+                  className="flex items-center gap-2 bg-green-700 px-4 py-1.5 rounded text-sm hover:bg-green-800 transition"
                 >
                   Регистрация
                 </button>
@@ -441,11 +543,11 @@ function App() {
 
             <button
               onClick={() => setView('cart')}
-              className="relative bg-orange-500 p-2 rounded-full hover:bg-orange-600 transition shadow-md"
+              className="relative bg-[#FF9900] p-1.5 rounded-full hover:opacity-90 transition shadow-md shrink-0"
             >
-              <ShoppingCart size={24} />
+              <ShoppingCart size={19} />
               {cart.length > 0 && (
-                <span className="absolute -top-2 -right-2 bg-red-600 text-white text-[10px] w-5 h-5 rounded-full flex items-center justify-center font-bold">
+                <span className="absolute -top-1 -right-1 bg-[#FF9900] text-white text-[8px] w-4 h-4 rounded-full flex items-center justify-center font-bold">
                   {cart.length}
                 </span>
               )}
@@ -685,20 +787,42 @@ function App() {
       <main className="flex-grow container mx-auto px-4 py-8">
         {view === 'catalog' ? (
           <>
-            <div className="flex justify-between items-center mb-6">
-              <h2 className="text-2xl font-bold border-b-2 border-blue-700 inline-block pb-2">Каталог телевизоров</h2>
-              <button
-                onClick={handleUpdateProducts}
-                disabled={parsing}
-                className={`flex items-center gap-2 px-4 py-2 rounded-lg font-semibold transition-colors ${
-                  parsing 
-                    ? 'bg-gray-400 cursor-not-allowed' 
-                    : 'bg-green-600 hover:bg-green-700 text-white'
-                }`}
-              >
-                <RefreshCw size={18} className={parsing ? 'animate-spin' : ''} />
-                {parsing ? 'Обновление...' : 'Обновить продукты'}
-              </button>
+            {/* Панель управления: сортировка, акция, кнопка обновления — тот же контейнер, что и сетка товаров */}
+            <div className="container mx-auto px-4 mt-0 mb-8">
+              <div className="grid grid-cols-3 items-center w-full">
+                <div className="flex items-center gap-2 justify-self-start">
+                  <label htmlFor="sort-select" className="text-sm font-bold text-gray-700 whitespace-nowrap">Сортировать по:</label>
+                  <select
+                    id="sort-select"
+                    value={sortOptions.some((o) => o.value === sortBy) ? sortBy : 'price_asc'}
+                    onChange={(e) => setSortBy(e.target.value)}
+                    className="text-sm border border-gray-300 rounded-lg px-3 py-1.5 bg-white text-gray-800 focus:ring-2 focus:ring-[#3299BB] focus:border-transparent"
+                  >
+                    {sortOptions.map((opt) => (
+                      <option key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="bg-pink-50 text-pink-700 px-7 py-2.5 rounded-full font-bold text-base whitespace-nowrap justify-self-center">
+                  ❤️ Скидка 3-5% на все телевизоры 14-15 февраля!
+                </div>
+                <div className="justify-self-end">
+                  <button
+                    onClick={handleUpdateProducts}
+                    disabled={parsing}
+                    className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] font-semibold transition-colors shrink-0 ${
+                      parsing 
+                        ? 'bg-[#BCBCBC] cursor-not-allowed text-gray-600' 
+                        : 'bg-[#BCBCBC] hover:opacity-90 text-gray-800'
+                    }`}
+                  >
+                    <RefreshCw size={9} className={parsing ? 'animate-spin' : ''} />
+                    {parsing ? 'Обновление...' : 'Обновить продукты'}
+                  </button>
+                </div>
+              </div>
             </div>
             {parseMessage && (
               <div className="bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded mb-4">
@@ -720,7 +844,7 @@ function App() {
               </div>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-                {products.map(product => (
+                {sortedProducts.map(product => (
                 <div key={product.id} className="bg-white border rounded-xl p-4 flex flex-col shadow-sm hover:shadow-xl transition-all duration-300 group">
                   <div className="h-48 overflow-hidden mb-4 rounded-lg bg-gray-100 flex items-center justify-center">
                     <img
@@ -733,12 +857,12 @@ function App() {
                     {product.title}
                   </h3>
                   <div className="mt-auto">
-                    <div className="text-2xl font-black text-blue-800 mb-4 tracking-tight">
+                    <div className="text-2xl font-black text-[#3299BB] mb-4 tracking-tight">
                       {typeof product.price === 'number' ? product.price.toFixed(2) : product.price} <span className="text-sm font-normal">BYN</span>
                     </div>
                     <button
                       onClick={() => addToCart(product)}
-                      className="w-full bg-orange-500 text-white py-3 rounded-lg font-bold hover:bg-orange-600 transition-colors shadow-sm flex items-center justify-center gap-2"
+                      className="w-full bg-[#FF9900] text-white py-3 rounded-lg font-bold hover:opacity-90 transition-colors shadow-sm flex items-center justify-center gap-2"
                     >
                       <ShoppingCart size={18}/> КУПИТЬ
                     </button>
@@ -804,17 +928,53 @@ function App() {
       </main>
 
       {/* ФУТЕР */}
-      <footer className="bg-gray-900 text-gray-400 py-10 mt-12 border-t-4 border-blue-700">
-        <div className="container mx-auto px-4 grid grid-cols-1 md:grid-cols-2 gap-8">
-          <div>
-            <h4 className="text-white font-bold text-lg mb-2">Наш магазин</h4>
-            <p className="text-sm max-w-md">Мы предлагаем лучшие телевизоры, собранные специально для вас с сайта DNS. Только актуальные цены и наличие.</p>
+      <footer className="bg-[#424242] text-gray-300 py-6 mt-12 border-t-4 border-[#424242]">
+        <div className="max-w-6xl mx-auto px-4 grid grid-cols-1 md:grid-cols-2 gap-8 md:gap-12 justify-items-center">
+          <div className="text-center md:text-left w-full md:max-w-xs">
+            <h4 className="text-white font-bold text-lg mb-2">О компании</h4>
+            <div className="text-sm text-justify space-y-1">
+              <p>Юридический адрес:</p>
+              <p>220003 г.Минск,</p>
+              <p>ул. Солнечная д.4</p>
+              <p>офис 5</p>
+              <p className="mt-2">тел./факс 375172200980</p>
+            </div>
+            <div className="mt-4 space-y-1 text-sm text-justify">
+              <p className="hover:text-white cursor-pointer transition-colors">Часто задаваемые вопросы</p>
+              <p className="hover:text-white cursor-pointer transition-colors">Замена и возврат товара</p>
+              <p className="hover:text-white cursor-pointer transition-colors">Рассрочка</p>
+            </div>
           </div>
-          <div className="md:text-right">
-            <h4 className="text-white font-bold text-lg mb-2">Контакты</h4>
-            <p className="text-sm">Адрес: г.Минск, ул. Саперов, 3</p>
-            <p className="text-sm">Телефон: +375254560098</p>
-            <p className="text-xs mt-4">© 2024 DNS-BY. Все права защищены.</p>
+          <div className="w-full md:max-w-xs">
+            <h4 className="text-white font-bold text-lg mb-2 text-left">Мы в социальных сетях</h4>
+            <div className="space-y-1 text-sm text-left">
+              <div className="flex items-center justify-start hover:text-white cursor-pointer transition-colors">
+                <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-sky-500 text-white text-xs font-bold flex-shrink-0 mr-2">
+                  TG
+                </span>
+                <span>Наш Telegram</span>
+              </div>
+              <div className="flex items-center justify-start hover:text-white cursor-pointer transition-colors">
+                <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-gradient-to-br from-purple-600 via-pink-600 to-orange-500 text-white text-xs font-bold flex-shrink-0 mr-2">
+                  IG
+                </span>
+                <span>Наш Instagram</span>
+              </div>
+              <div className="flex items-center justify-start hover:text-white cursor-pointer transition-colors">
+                <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-blue-600 text-white text-xs font-bold flex-shrink-0 mr-2">
+                  f
+                </span>
+                <span>Наш Facebook</span>
+              </div>
+              <div className="flex items-center justify-start hover:text-white cursor-pointer transition-colors">
+                <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-sky-700 text-white text-[10px] font-bold flex-shrink-0 mr-2">
+                  VK
+                </span>
+                <span>Мы ВКонтакте</span>
+              </div>
+              <p className="hover:text-white cursor-pointer transition-colors">Отзывы наших клиентов</p>
+              <p className="hover:text-white cursor-pointer transition-colors">Подписаться на новости</p>
+            </div>
           </div>
         </div>
       </footer>
