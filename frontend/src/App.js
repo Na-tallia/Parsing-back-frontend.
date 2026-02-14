@@ -812,10 +812,10 @@ function App() {
                   <button
                     onClick={handleUpdateProducts}
                     disabled={parsing}
-                    className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] font-semibold transition-colors shrink-0 ${
+                    className={`flex items-center gap-1 px-[calc(0.375rem-0.14%)] py-[calc(0.25rem+0.25%)] rounded text-[10px] font-semibold transition-colors shrink-0 ${
                       parsing 
-                        ? 'bg-[#BCBCBC] cursor-not-allowed text-gray-600' 
-                        : 'bg-[#BCBCBC] hover:opacity-90 text-gray-800'
+                        ? 'bg-[#E9E9E9] cursor-not-allowed text-gray-600' 
+                        : 'bg-[#E9E9E9] hover:opacity-90 text-gray-800'
                     }`}
                   >
                     <RefreshCw size={9} className={parsing ? 'animate-spin' : ''} />
